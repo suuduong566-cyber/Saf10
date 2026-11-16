@@ -1,0 +1,54 @@
+name: Build UADiscover deb v2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create project files (reuses build.yml)
+        run: |
+          python3 - <<'PY'
+          import yaml
+          d = yaml.safe_load(open(".github/workflows/build.yml"))
+          open("/tmp/create.sh", "w").write(d["jobs"]["build"]["steps"][0]["run"])
+          PY
+          bash /tmp/create.sh
+          ls -R uad | head -30
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential fakeroot rsync curl perl git xz-utils libio-compress-lzma-perl
+          sudo ln -sf /lib/x86_64-linux-gnu/libtinfo.so.6 /lib/x86_64-linux-gnu/libtinfo.so.5
+
+      - name: Install Theos, toolchain and iOS 10.3 SDK
+        run: |
+          export THEOS="$HOME/theos"
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
+          curl -fsSL -o tc.tar.lzma https://github.com/sbingner/llvm-project/releases/download/v10.0.0-2/linux-ios-arm64e-clang-toolchain.tar.lzma
+          TMP=$(mktemp -d)
+          tar --lzma -xf tc.tar.lzma -C "$TMP"
+          mkdir -p "$THEOS/toolchain/linux/iphone"
+          mv "$TMP"/ios-arm64e-clang-toolchain/* "$THEOS/toolchain/linux/iphone/"
+          rm -rf "$TMP" tc.tar.lzma
+          "$THEOS/bin/install-sdk" iPhoneOS10.3
+          ls "$THEOS/toolchain/linux/iphone/bin" | head -40
+          "$THEOS/toolchain/linux/iphone/bin/clang" --version
+
+      - name: Build deb
+        run: |
+          export THEOS="$HOME/theos"
+          cd uad
+          make package FINALPACKAGE=1 THEOS_PLATFORM_DEB_COMPRESSION_TYPE=gzip
+          ls -l packages
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: UADiscover-deb
+          path: uad/packages/*.deb
+          if-no-files-found: error
